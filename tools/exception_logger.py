@@ -11,6 +11,40 @@ class WrappedExceptionTracebackFormatter(logging.Formatter):
         results = '|'.join(result_list[:-1]) + '|' + tb
         return results
         
+class MySQLHandler(logging.Handler):
+    def __init__(self, sql_conn, sql_curstor, db_tbl_log):
+        logging.Handler.__init__(self)
+        self.sql_cursor = sql_cursor
+        self.sql_conn = sql_conn
+        self.db_tbl_log = db_tbl_log
+    def emit(self, record):
+        tm = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(record.created))
+        # Clear the log message so it can be put to db via sql (escape quotes)
+        self.log_msg = record.msg
+        self.log_msg = self.log_msg.strip()
+        self.log_msg = self.log_msg.replace('\'', '\'\'')
+        # todo :Make the SQL insert
+        """
+        example:
+        sql = 'INSERT INTO ' + self.db_tbl_log + ' (log_level, ' + \
+            'log_levelname, log, created_at, created_by) ' + \
+            'VALUES (' + \
+            ''   + str(record.levelno) + ', ' + \
+            '\'' + str(record.levelname) + '\', ' + \
+            '\'' + str(self.log_msg) + '\', ' + \
+            '(convert(datetime2(7), \'' + tm + '\')), ' + \
+            '\'' + str(record.name) + '\')'
+        """
+        try:
+            self.sql_cursor.execute(sql)
+            self.sql_conn.commit()
+        # If error - print it out on screen. Since DB is not working - there's
+        # no point making a log about it to the database :)
+        except pymssql.Error as e:
+            print sql
+            print 'CRITICAL DB ERROR! Logging to database not possible!'
+            
+            
 def create_logger(name, path):
     """
     Creates a logging object and returns it
@@ -30,7 +64,7 @@ def create_logger(name, path):
     return logger
     
     
-def log_exception(logger):
+def log_exception(logger, verbose_exception_logging=False):
     """
     A decorator that wraps the passed in function and logs 
     exceptions should one occur
@@ -47,6 +81,8 @@ def log_exception(logger):
                 tb = traceback.extract_tb(tb)
                 full_tb = stack[:-1] + tb
                 tb_str = ''.join(traceback.format_list(full_tb))
+                if verbose_exception_logging:
+                    print ei.__str__()
                 logger.error(e.__class__.__name__ + ei.__str__() + tb_str)
         return wrapper
     return decorator
@@ -86,7 +122,7 @@ def add_kwargs_note_to_exception(*key_words):
                 err_func = func.__name__
                 note_list = [str(kwargs[key_word]) for key_word in key_words]
                 note_str = ','.join(note_list)
-                raise type(e)(e.__str__() + '| ' + 'note: ' + note_str + '| ' + '| function: '+err_func + '|'), tb
+                raise type(e), type(e)(e.__str__() + '| ' + 'note: ' + note_str + '| ' + '| function: '+err_func + '|'), tb
         return wrapper
     return decorator    
 
